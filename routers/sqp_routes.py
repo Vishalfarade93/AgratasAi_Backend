@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Depends, Form
+from fastapi import APIRouter, UploadFile, File, Depends, Query
 from sqlalchemy.orm import Session
 from database.db import get_db
 from core.dependencies import get_current_seller
@@ -8,6 +8,7 @@ from services.analytics.metrics_engine import calculate_metrics
 from services.analytics.trend_engine import get_keyword_trends
 from services.analytics.aggregation_engine import get_aggregated_view
 from services.insights.ai_engine import generate_insights
+from services.analytics.keyword_service import get_keyword_detail  # <-- correct import
 
 router = APIRouter()
 
@@ -30,7 +31,8 @@ def get_latest_analytics(db: Session = Depends(get_db), current_seller: Seller =
     if not latest_report:
         return {"success": False, "message": "No reports found. Please upload your first SQP CSV."}
 
-    keywords = db.query(SqpBrandKeyword).filter(SqpBrandKeyword.report_id == latest_report.id).all()
+    keywords = db.query(SqpBrandKeyword).filter(
+        SqpBrandKeyword.report_id == latest_report.id).all()
     metrics = calculate_metrics(keywords)
 
     return {
@@ -46,19 +48,11 @@ def get_latest_analytics(db: Session = Depends(get_db), current_seller: Seller =
 
 @router.get("/analytics/trends")
 def get_trends(
-    range_filter: str = "6weeks",
+    range_filter: str = Query(
+        "6weeks", description="Filter: 4weeks,6weeks,8weeks,this_month,last_month,all"),
     db: Session = Depends(get_db),
     current_seller: Seller = Depends(get_current_seller)
 ):
-    """
-    filter options:
-      6weeks     → latest 6 weeks (default)
-      4weeks     → latest 4 weeks
-      8weeks     → latest 8 weeks
-      this_month → current calendar month
-      last_month → previous calendar month
-      all        → all available data
-    """
     return get_keyword_trends(seller_id=current_seller.id, db=db, filter_type=range_filter)
 
 
@@ -99,7 +93,7 @@ def get_reports(db: Session = Depends(get_db), current_seller: Seller = Depends(
 
 @router.get("/insights")
 def get_insights(
-    range_filter: str = "6weeks",
+    range_filter: str = Query("6weeks", description="Filter for trends"),
     db: Session = Depends(get_db),
     current_seller: Seller = Depends(get_current_seller)
 ):
@@ -110,12 +104,25 @@ def get_insights(
     if not latest_report:
         return {"success": False, "message": "No reports found"}
 
-    keywords = db.query(SqpBrandKeyword).filter(SqpBrandKeyword.report_id == latest_report.id).all()
-    metrics  = calculate_metrics(keywords)
-    trends   = get_keyword_trends(seller_id=current_seller.id, db=db, filter_type=range_filter)
+    keywords = db.query(SqpBrandKeyword).filter(
+        SqpBrandKeyword.report_id == latest_report.id).all()
+    metrics = calculate_metrics(keywords)
+    trends = get_keyword_trends(
+        seller_id=current_seller.id, db=db, filter_type=range_filter)
 
     return generate_insights(
         seller_id=current_seller.id,
         metrics=metrics,
         trends=trends if trends.get("success") else {}
     )
+
+
+@router.get("/keyword/detail")
+def get_keyword_detail_endpoint(
+    search_query: str = Query(..., description="The keyword to analyze"),
+    filter_type: str = Query(
+        "6weeks", description="Time filter: 4weeks,6weeks,8weeks,this_month,last_month,all"),
+    db: Session = Depends(get_db),
+    current_seller: Seller = Depends(get_current_seller)
+):
+    return get_keyword_detail(current_seller.id, search_query, filter_type, db)
